@@ -1,0 +1,40 @@
+# TaxFlow AI - .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Environment
+.env
+.encryption_key
+*.db
+
+# Data
+client_data/*
+!client_data/.gitkeep
+uploads/*
+!uploads/.gitkeep
+exports/*
+!exports/.gitkeep
+data/sample/*.pdf
+data/sample/*.xlsx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Virtual environments
+venv/
+.venv/
+env/

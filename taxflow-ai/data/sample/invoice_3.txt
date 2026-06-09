@@ -1,0 +1,47 @@
+EXPORT INVOICE
+==============
+
+Invoice No: EXP-2024-001
+Date: 25-Jan-2024
+Place of Supply: Tamil Nadu (33)
+
+Exporter Details:
+  ExportHouse Inc
+  567, Industrial Estate, Ambattur
+  Chennai - 600058
+  GSTIN: 33AAAE7890L1Z9
+  PAN: AAAE7890L
+  State: Tamil Nadu (33)
+  IEC: 1234567890
+
+Buyer Details:
+  International Buyer LLC
+  100, Trade Center, 5th Avenue
+  New York, NY 10001, USA
+
+Shipping:
+  Port of Loading: Chennai (MAA)
+  Port of Discharge: New York (NYC)
+  Country of Origin: India
+  Country of Destination: USA
+
+| # | HSN Code | Description         | Qty   | Rate/Unit | Amount     |
+|---|----------|---------------------|-------|-----------|------------|
+| 1 | 5208     | Cotton Fabric 100%  | 5000m | $5.00/m   | $25,000.00 |
+|---|----------|---------------------|-------|-----------|------------|
+|   |          | Total FOB Value     |       |           | $25,000.00 |
+
+Export Invoice Value (FOB): USD 25,000.00
+Exchange Rate: 1 USD = ₹83.50
+
+Invoice Value in INR: ₹20,87,500.00
+
+Tax on Exports with LUT:
+  This is a Zero-rated supply under Bond/LUT
+  IGST: 0% (Exempted under Notification No. ...)
+
+Declaration:
+  We declare that this invoice shows the actual price of the goods
+  described and that all particulars are true and correct.
+
+LUT No: LUT-EXP-2024-001 dated 01-Apr-2023

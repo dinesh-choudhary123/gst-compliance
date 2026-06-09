@@ -1,0 +1,39 @@
+TAX INVOICE - SERVICES
+======================
+
+Invoice No: INV-2024-002
+Date: 20-Jan-2024
+Place of Supply: Delhi (07)
+
+Seller Details:
+  CloudSaaS Ltd
+  789, Cyber City, Phase 2
+  Gurugram - 122002
+  GSTIN: 06AABCS9012J1Z7
+  PAN: AABCS9012J
+  State: Haryana (06)
+
+Buyer Details:
+  RetailMart India
+  321, Connaught Place
+  New Delhi - 110001
+  GSTIN: 07AAARM3456K1Z8
+  PAN: AAARM3456K
+  State: Delhi (07)
+
+| # | SAC Code | Description                 | Qty | Rate   | Amount    |
+|---|----------|-----------------------------|-----|--------|-----------|
+| 1 | 998311   | Cloud Infrastructure - Q1  | 1   | 350,000| 350,000   |
+| 2 | 998311   | SaaS License - Enterprise   | 1   | 100,000| 100,000   |
+| 3 | 998396   | Annual Maintenance Support  | 1   | 50,000 | 50,000    |
+|---|----------|-----------------------------|-----|--------|-----------|
+|   |          | Total                       |     |        | 500,000   |
+
+Taxable Amount: ₹5,00,000.00
+IGST @ 18%:     ₹90,000.00
+
+Total Invoice Amount: ₹5,90,000.00
+
+Amount Chargeable (in words): Five Lakh Ninety Thousand Rupees Only
+
+IRN: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6

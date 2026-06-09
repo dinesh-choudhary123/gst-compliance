@@ -1,0 +1,42 @@
+TAX INVOICE
+============
+
+Invoice No: INV-2024-001
+Date: 15-Jan-2024
+Place of Supply: Maharashtra (27)
+
+Seller Details:
+  TechMart Solutions
+  123, Business Park, Andheri East
+  Mumbai - 400093
+  GSTIN: 27AABCT1234F1Z5
+  PAN: AABCT1234F
+  State: Maharashtra (27)
+
+Buyer Details:
+  Global Trade Co
+  456, Corporate Avenue, Fort
+  Mumbai - 400001
+  GSTIN: 29AAAFG5678H1Z6
+  PAN: AAAFG5678H
+  State: Maharashtra (27)
+
+| # | HSN Code | Description     | Qty | Rate/Unit | Amount  |
+|---|----------|-----------------|-----|-----------|---------|
+| 1 | 847130   | Laptop Pro 15"  | 5   | 50,000    | 250,000 |
+| 2 | 847130   | Laptop Air 13"  | 3   | 35,000    | 105,000 |
+| 3 | 844332   | Laser Printer   | 2   | 22,500    | 45,000  |
+|---|----------|-----------------|-----|-----------|---------|
+|   |          | Total           |     |           | 400,000 |
+
+Taxable Amount: ₹4,00,000.00
+CGST @ 9%:      ₹36,000.00
+SGST @ 9%:      ₹36,000.00
+Total Tax:      ₹72,000.00
+
+Total Invoice Amount: ₹4,72,000.00
+
+Amount Chargeable (in words): Four Lakh Seventy Two Thousand Rupees Only
+
+IRN: e7b8c9d0a1f2e3d4c5b6a7f8e9d0c1b2
+Signed QR Code: Present

@@ -1,0 +1,21 @@
+Date,Narration,Cheque No,Debit,Credit,Balance
+01-Jan-2024,Opening Balance,,,,500000.00
+03-Jan-2024,NEFT IN - TechMart Solutions - INV-2024-001 Payment,,,472000.00,972000.00
+05-Jan-2024,GST Payment - CGST - Jan 2024,CHQ-101,36000.00,,936000.00
+05-Jan-2024,GST Payment - SGST - Jan 2024,CHQ-102,36000.00,,900000.00
+07-Jan-2024,NEFT IN - CloudSaaS Ltd - INV-2024-002 Payment,,,590000.00,1490000.00
+08-Jan-2024,Rent Payment - Office Premises,CHQ-103,150000.00,,1340000.00
+10-Jan-2024,Salary - January 2024,CHQ-104,450000.00,,890000.00
+12-Jan-2024,NEFT IN - ExportHouse Inc - EXP-2024-001,,,2087500.00,2977500.00
+15-Jan-2024,Office Supplies Purchase,CHQ-105,45000.00,,2932500.00
+16-Jan-2024,Electricity Bill - Jan 2024,CHQ-106,32000.00,,2900500.00
+18-Jan-2024,Internet & Telecom,CHQ-107,15000.00,,2885500.00
+20-Jan-2024,Legal & Professional Fees,CHQ-108,75000.00,,2810500.00
+22-Jan-2024,NEFT IN - RetailMart India - Consulting,,,250000.00,3060500.00
+25-Jan-2024,TDS Payment - Q4,CHQ-109,45000.00,,3015500.00
+27-Jan-2024,Insurance Premium - Annual,CHQ-110,120000.00,,2895500.00
+28-Jan-2024,IT Equipment Purchase,CHQ-111,85000.00,,2810500.00
+29-Jan-2024,NEFT IN - Interest on Fixed Deposit,,,12500.00,2823000.00
+30-Jan-2024,Travelling Expenses,CHQ-112,28000.00,,2795000.00
+31-Jan-2024,Maintenance Charges - Jan 2024,CHQ-113,12000.00,,2783000.00
+31-Jan-2024,Closing Balance,,,,,2783000.00
