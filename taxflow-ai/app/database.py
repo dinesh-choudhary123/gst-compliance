@@ -193,6 +193,54 @@ def init_project_db(project_id: str):
                 timestamp TEXT DEFAULT (datetime('now')),
                 metadata TEXT DEFAULT '{}'
             );
+
+            CREATE TABLE IF NOT EXISTS gst_knowledge (
+                id TEXT PRIMARY KEY,
+                rule_id TEXT UNIQUE,
+                section TEXT,
+                title TEXT,
+                category TEXT,
+                subcategory TEXT,
+                content TEXT,
+                keywords TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS processing_logs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                filename TEXT DEFAULT '',
+                details TEXT DEFAULT '',
+                error_message TEXT DEFAULT '',
+                duration_ms INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                completed_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS tds_records (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                section TEXT,
+                party_name TEXT,
+                invoice_number TEXT,
+                amount REAL DEFAULT 0.0,
+                tds_amount REAL DEFAULT 0.0,
+                tds_rate REAL DEFAULT 0.0,
+                financial_year TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS onboarding_progress (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL UNIQUE,
+                completed_items TEXT DEFAULT '[]',
+                progress_pct REAL DEFAULT 0.0,
+                started_at TEXT DEFAULT (datetime('now')),
+                completed_at TEXT,
+                status TEXT DEFAULT 'in_progress'
+            );
         """)
         conn.commit()
     finally:

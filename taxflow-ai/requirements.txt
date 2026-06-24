@@ -30,3 +30,17 @@ openpyxl>=3.1.0,<4.0.0  # (also needed for reading/writing Excel)
 
 # ─── Development ─────────────────────────────────────────────────
 python-dotenv>=1.0.0
+
+# ─── Visualization ─────────────────────────────────────────────
+plotly>=5.24.0,<6.0.0
+kaleido>=0.2.0,<1.0.0  # Static image export for Plotly
+
+# ─── OCR ──────────────────────────────────────────────────────────
+pytesseract>=0.3.10,<1.0.0
+Pillow>=10.0.0,<11.0.0
+
+# ─── Voice Input ──────────────────────────────────────────────────
+SpeechRecognition>=3.10.0,<4.0.0
+
+# ─── Vector / Embeddings ──────────────────────────────────────────
+numpy>=1.24.0,<2.0.0

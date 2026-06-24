@@ -41,6 +41,44 @@ from app.reports.excel import generate_invoice_report, generate_gstr_report
 from app.reports.pdf import generate_invoice_pdf, generate_gstr_pdf
 from app.reports.json_report import export_comprehensive_json
 from app.ui.styles import CUSTOM_CSS, THEME_TOGGLE_JS
+from app.ui.dashboard import build_dashboard_html
+from app.ui.gst_calendar import build_calendar_html, get_next_deadline
+from app.ui.gst_tools import build_tax_calculator_html, build_hsn_lookup_html
+from app.ui.activity import build_activity_feed_html, build_quick_stats_html
+from app.ui.onboarding import build_onboarding_html, get_onboarding_stats
+from app.activity_db import (
+    init_activity_db,
+    add_activity,
+    get_activities,
+    get_recent_activities_summary,
+)
+from app.reports.accounting import (
+    generate_balance_sheet, generate_cash_flow_statement,
+    generate_trial_balance, generate_ledger_summary,
+    format_balance_sheet_html, format_cash_flow_html,
+    format_trial_balance_html, format_ledger_html,
+)
+from app.reports.tally_export import (
+    generate_tally_xml, generate_qb_csv, generate_zoho_csv,
+    generate_unified_accounting_export,
+)
+from app.tds_tcs_calculator import TDSCalculator, format_tds_html, format_tcs_html
+from app.penalty_calculator import PenaltyCalculator, format_penalty_html
+from app.cash_flow_forecaster import CashFlowForecaster, format_forecast_html
+from app.rag_knowledge_base import get_knowledge_base, get_rag_context, search_gst_rules
+from app.processing_logs import (
+    init_processing_logs_db, add_processing_log, get_processing_logs,
+    build_logs_viewer_html, get_logs_summary,
+)
+try:
+    from app.ocr_module import check_tesseract_available, ocr_pdf, enhanced_extraction, install_tesseract_instructions
+    HAS_OCR = check_tesseract_available()
+except ImportError:
+    HAS_OCR = False
+    def check_tesseract_available(): return False
+    def ocr_pdf(*args, **kwargs): return "[OCR not available]"
+    def enhanced_extraction(*args, **kwargs): return {"text": "", "method": "text", "ocr_used": False}
+    def install_tesseract_instructions(): return "Install: pip install pytesseract pillow"
 
 # ─── Global State ────────────────────────────────────────────────
 
@@ -152,7 +190,7 @@ def handle_select_project(project_id: str):
 
     if not project_id:
         _CURRENT_PROJECT_ID = None
-        return "No project selected", "", ""
+        return "No project selected", "", "", ""
 
     _CURRENT_PROJECT_ID = project_id
 
@@ -179,7 +217,13 @@ def handle_select_project(project_id: str):
     # Build sidebar HTML
     sidebar_items = _build_sidebar_html(project_id)
 
-    return info, stats, gr.update(value=sidebar_items)
+    # Build dashboard
+    dashboard_html = build_dashboard_html(project, invoices, transactions, anomalies, docs)
+
+    # Track activity
+    add_activity(project_id, "project", f"Opened project: {project.get('name', '')}", f"{len(docs)} docs, {len(invoices)} invoices")
+
+    return info, stats, gr.update(value=sidebar_items), gr.update(value=dashboard_html)
 
 
 def handle_delete_project(project_id: str):
@@ -208,24 +252,26 @@ def handle_file_upload(files):
 
     results = []
     all_messages = []
+    success_count = 0
 
     for file_info in files:
         filename = file_info.name if hasattr(file_info, 'name') else os.path.basename(file_info)
-        file_path = file_info if isinstance(file_info, str) else file_info.name
+        file_path = Path(file_info if isinstance(file_info, str) else file_info.name)
 
         # Copy to project uploads
         project_upload_dir = _UPLOAD_DIR / _CURRENT_PROJECT_ID
         os.makedirs(project_upload_dir, exist_ok=True)
         dest_path = project_upload_dir / filename
 
-        try:
-            shutil.copy2(file_path, dest_path)
-        except Exception:
-            # If file_info is already a path string, handle differently
-            if os.path.isfile(file_path):
-                shutil.copy2(file_path, dest_path)
-            else:
-                results.append(f"❌ Could not process: {filename}")
+        # Skip copy if source and destination are the same file
+        if file_path.resolve() == dest_path.resolve():
+            final_path = str(file_path)
+        else:
+            try:
+                shutil.copy2(str(file_path), str(dest_path))
+                final_path = str(dest_path)
+            except (shutil.SameFileError, OSError, IOError) as e:
+                results.append(f"❌ Could not process {filename}: {e}")
                 continue
 
         # Determine document type
@@ -238,13 +284,21 @@ def handle_file_upload(files):
             doc_type = "other"
 
         # Record in database
-        file_size = os.path.getsize(dest_path)
+        file_size = os.path.getsize(final_path)
         doc = add_document(
             _CURRENT_PROJECT_ID,
             filename,
-            str(dest_path),
+            final_path,
             doc_type=doc_type,
             file_size_bytes=file_size,
+        )
+
+        # Track activity
+        add_activity(
+            _CURRENT_PROJECT_ID, "upload",
+            f"Uploaded {filename}",
+            f"Document type: {doc_type}, Size: {file_size:,} bytes",
+            {"filename": filename, "doc_type": doc_type, "size": file_size},
         )
 
         # Process with AI if available
@@ -253,13 +307,20 @@ def handle_file_upload(files):
                 result = _extractor.process_document(
                     _CURRENT_PROJECT_ID,
                     doc["id"],
-                    str(dest_path),
+                    final_path,
                     filename,
                     doc_type,
                 )
                 if result.get("success"):
                     results.append(f"✅ {result.get('message', 'Processed')}")
                     all_messages.append(result.get("message", ""))
+                    success_count += 1
+                    add_activity(
+                        _CURRENT_PROJECT_ID, "extract",
+                        f"Extracted data from {filename}",
+                        result.get("message", "")[:200],
+                        result,
+                    )
                 else:
                     results.append(f"⚠️ {result.get('message', 'Uploaded but processing incomplete')}")
             except Exception as e:
@@ -273,7 +334,7 @@ def handle_file_upload(files):
     docs = get_documents(_CURRENT_PROJECT_ID)
     sidebar_items = _build_sidebar_html(_CURRENT_PROJECT_ID)
 
-    return summary, gr.update(value=sidebar_items), f"📄 {len(files)} file(s) uploaded"
+    return summary, gr.update(value=sidebar_items), f"📄 {success_count}/{len(files)} file(s) processed"
 
 
 def _build_sidebar_html(project_id: str) -> str:
@@ -487,9 +548,332 @@ def handle_export_json():
             gstr3b_data[-1]["data"] if gstr3b_data else None,
             json_path,
         )
+        add_activity(_CURRENT_PROJECT_ID, "export", "Exported JSON report", f"Comprehensive report saved to {json_path}")
         return f"✅ JSON report generated", gr.update(visible=True)
     except Exception as e:
         return f"❌ JSON export error: {str(e)}", None
+
+
+# ─── Dashboard Handler ──────────────────────────────────────────
+
+def handle_refresh_dashboard():
+    """Refresh the dashboard with updated charts."""
+    if not _CURRENT_PROJECT_ID:
+        return build_dashboard_html({}, [], [], [], [])
+
+    project = get_project(_CURRENT_PROJECT_ID) or {}
+    invoices = get_invoices(_CURRENT_PROJECT_ID)
+    transactions = get_bank_transactions(_CURRENT_PROJECT_ID)
+    anomalies = get_anomalies(_CURRENT_PROJECT_ID)
+    documents = get_documents(_CURRENT_PROJECT_ID)
+    gstr1_data = get_gstr_data(_CURRENT_PROJECT_ID, "gstr1")
+    gstr3b_data = get_gstr_data(_CURRENT_PROJECT_ID, "gstr3b")
+
+    gstr1 = gstr1_data[-1]["data"] if gstr1_data else None
+    gstr3b = gstr3b_data[-1]["data"] if gstr3b_data else None
+
+    return build_dashboard_html(project, invoices, transactions, anomalies, documents, gstr1, gstr3b)
+
+
+# ─── Calendar Handler ───────────────────────────────────────────
+
+def handle_refresh_calendar():
+    """Refresh the GST compliance calendar."""
+    return build_calendar_html()
+
+
+# ─── Activity Handler ───────────────────────────────────────────
+
+def handle_refresh_activity():
+    """Refresh the activity feed."""
+    if not _CURRENT_PROJECT_ID:
+        return build_activity_feed_html([])
+
+    activities = get_activities(_CURRENT_PROJECT_ID, limit=50)
+    return build_activity_feed_html(activities)
+
+
+def handle_clear_activity():
+    """Clear activity feed."""
+    if _CURRENT_PROJECT_ID:
+        from app.activity_db import clear_activities
+        clear_activities(_CURRENT_PROJECT_ID)
+    return build_activity_feed_html([])
+
+
+# ─── CSV Export Handlers ────────────────────────────────────────
+
+def _generate_gstr_csv(invoices: list[dict], form_type: str) -> str:
+    """Generate a GST portal-ready CSV string."""
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if form_type == "gstr1":
+        # GSTR-1 CSV format
+        writer.writerow([
+            "GSTIN", "Invoice Number", "Invoice Date", "Invoice Value",
+            "Place of Supply", "Rate", "Taxable Value",
+            "IGST", "CGST", "SGST", "Cess",
+            "Buyer GSTIN", "Buyer Name", "HSN Code",
+        ])
+        for inv in invoices:
+            seller_gstin = inv.get("seller_gstin", "")
+            hsn_codes = inv.get("hsn_codes", [])
+            hsn = hsn_codes[0].get("code", "") if hsn_codes else ""
+            total_tax = inv.get("cgst_amount", 0) + inv.get("sgst_amount", 0) + inv.get("igst_amount", 0)
+            taxable = inv.get("taxable_amount", 0)
+            rate = round((total_tax / taxable) * 100, 2) if taxable > 0 else 0
+
+            writer.writerow([
+                seller_gstin,
+                inv.get("invoice_number", ""),
+                (inv.get("invoice_date", "") or "")[:10],
+                inv.get("total_amount", 0),
+                inv.get("place_of_supply", ""),
+                rate,
+                taxable,
+                inv.get("igst_amount", 0),
+                inv.get("cgst_amount", 0),
+                inv.get("sgst_amount", 0),
+                inv.get("cess_amount", 0),
+                inv.get("buyer_gstin", ""),
+                inv.get("buyer_name", ""),
+                hsn,
+            ])
+
+    elif form_type == "gstr3b":
+        # GSTR-3B CSV format
+        writer.writerow([
+            "GSTIN", "Period", "Taxable Value (3a)",
+            "CGST Payable", "SGST Payable", "IGST Payable", "Cess Payable",
+            "Eligible ITC (CGST)", "Eligible ITC (SGST)", "Eligible ITC (IGST)",
+            "Net Tax Payable",
+        ])
+        total_cgst = sum(i.get("cgst_amount", 0) for i in invoices)
+        total_sgst = sum(i.get("sgst_amount", 0) for i in invoices)
+        total_igst = sum(i.get("igst_amount", 0) for i in invoices)
+        total_cess = sum(i.get("cess_amount", 0) for i in invoices)
+        taxable_value = sum(i.get("taxable_amount", 0) for i in invoices)
+        net_payable = total_cgst + total_sgst + total_igst + total_cess
+
+        seller_gstin = invoices[0].get("seller_gstin", "") if invoices else ""
+        period = datetime.now().strftime("%m%Y")
+
+        writer.writerow([
+            seller_gstin,
+            period,
+            taxable_value,
+            total_cgst,
+            total_sgst,
+            total_igst,
+            total_cess,
+            total_cgst,  # Eligible ITC
+            total_sgst,
+            total_igst,
+            net_payable,
+        ])
+
+    return output.getvalue()
+
+
+# ─── New Feature Handler Functions ────────────────────────────────
+
+def handle_accounting_report(report_type: str):
+    """Generate accounting reports."""
+    if not _CURRENT_PROJECT_ID:
+        return "<p style='color:#DC2626;'>No project selected.</p>"
+
+    try:
+        if report_type == "balance_sheet":
+            bs = generate_balance_sheet(_CURRENT_PROJECT_ID)
+            return format_balance_sheet_html(bs)
+        elif report_type == "cash_flow":
+            cf = generate_cash_flow_statement(_CURRENT_PROJECT_ID)
+            return format_cash_flow_html(cf)
+        elif report_type == "trial_balance":
+            tb = generate_trial_balance(_CURRENT_PROJECT_ID)
+            return format_trial_balance_html(tb)
+        elif report_type == "ledger":
+            ls = generate_ledger_summary(_CURRENT_PROJECT_ID)
+            return format_ledger_html(ls)
+        return "<p>Select a report type</p>"
+    except Exception as e:
+        return f"<p style='color:#DC2626;font-size:13px;'>❌ Error: {str(e)}</p>"
+
+
+def handle_tds_calculation():
+    """Calculate TDS/TCS."""
+    if not _CURRENT_PROJECT_ID:
+        return "<p style='color:#DC2626;'>No project selected.</p>", "<p>N/A</p>"
+    try:
+        calc = TDSCalculator(_CURRENT_PROJECT_ID)
+        tds_data = calc.calculate_tds_it()
+        tcs_data = calc.calculate_tcs_gst()
+        return format_tds_html(tds_data), format_tcs_html(tcs_data)
+    except Exception as e:
+        return f"<p style='color:#DC2626;'>❌ {str(e)}</p>", ""
+
+
+def handle_penalty_calculation():
+    """Calculate penalties."""
+    if not _CURRENT_PROJECT_ID:
+        return "<p style='color:#DC2626;'>No project selected.</p>"
+    try:
+        calc = PenaltyCalculator(_CURRENT_PROJECT_ID)
+        data = calc.calculate_all()
+        return format_penalty_html(data)
+    except Exception as e:
+        return f"<p style='color:#DC2626;'>❌ {str(e)}</p>"
+
+
+def handle_cash_flow_forecast(months: int = 6):
+    """Generate cash flow forecast."""
+    if not _CURRENT_PROJECT_ID:
+        return "<p style='color:#DC2626;'>No project selected.</p>"
+    try:
+        forecaster = CashFlowForecaster(_CURRENT_PROJECT_ID)
+        data = forecaster.forecast(months)
+        return format_forecast_html(data)
+    except Exception as e:
+        return f"<p style='color:#DC2626;'>❌ {str(e)}</p>"
+
+
+def handle_knowledge_base_search(query: str):
+    """Search GST knowledge base."""
+    if not query:
+        return "<p style='color:#6B7280;'>Enter a search query (e.g., 'ITC eligibility', 'GSTR-1 due date')</p>"
+    try:
+        kb = get_knowledge_base()
+        results = kb.search(query, top_k=8)
+        if not results:
+            return "<p style='color:#6B7280;'>No results found for your query. Try different keywords.</p>"
+        html = '<div style="background:white;border-radius:8px;padding:8px;">'
+        for r in results:
+            html += f'''
+            <div class="kg-card" style="margin-bottom:6px;">
+                <div class="kg-card-header">
+                    <span class="kg-section-label">{r.get("section", "")}</span>
+                    <span class="kg-subcategory">{r.get("category", "")} > {r.get("subcategory", "")}</span>
+                    <span style="margin-left:auto;font-size:10px;color:#059669;font-weight:600;">{r.get("score", 0)*100:.0f}% match</span>
+                </div>
+                <div class="kg-card-title">{r.get("title", "")}</div>
+                <div class="kg-card-content">{r.get("content", "")[:300]}</div>
+            </div>'''
+        html += '</div>'
+        return html
+    except Exception as e:
+        return f"<p style='color:#DC2626;'>❌ {str(e)}</p>"
+
+
+def handle_onboarding_checklist():
+    """Build onboarding checklist."""
+    if not _CURRENT_PROJECT_ID:
+        return "<p style='color:#DC2626;'>No project selected.</p>"
+    try:
+        from app.database import get_project
+        project = get_project(_CURRENT_PROJECT_ID)
+        return build_onboarding_html(_CURRENT_PROJECT_ID, project)
+    except Exception as e:
+        return f"<p style='color:#DC2626;'>❌ {str(e)}</p>"
+
+
+def handle_processing_logs():
+    """Build processing logs viewer."""
+    if not _CURRENT_PROJECT_ID:
+        return "<p style='color:#DC2626;'>No project selected.</p>"
+    try:
+        return build_logs_viewer_html(_CURRENT_PROJECT_ID)
+    except Exception as e:
+        return f"<p style='color:#DC2626;'>❌ {str(e)}</p>"
+
+
+def handle_tally_export():
+    """Export to Tally/QuickBooks formats."""
+    if not _CURRENT_PROJECT_ID:
+        return "<p style='color:#DC2626;'>No project selected.</p>"
+    try:
+        from app.config import settings
+        output_dir = settings.BASE_DIR / "exports"
+        os.makedirs(str(output_dir), exist_ok=True)
+        results = generate_unified_accounting_export(_CURRENT_PROJECT_ID, str(output_dir))
+        msg = "✅ Tally/QuickBooks exports generated:<br>"
+        for fmt, path in results.items():
+            msg += f"• {fmt.replace('_', ' ').title()}: {path.rsplit('/', 1)[-1]}<br>"
+        add_activity(_CURRENT_PROJECT_ID, "export", "Exported accounting data", f"Tally/QuickBooks exports generated")
+        return msg
+    except Exception as e:
+        return f"<p style='color:#DC2626;'>❌ {str(e)}</p>"
+
+
+def handle_ocr_status():
+    """Check OCR availability and return info."""
+    available = check_tesseract_available()
+    if available:
+        return "<p style='color:#059669;'>✅ Tesseract OCR is installed and available.</p>"
+    instructions = install_tesseract_instructions()
+    return f'<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:12px;font-size:12px;"><strong>⚠️ Tesseract OCR not detected</strong><pre style="background:#1a2332;color:#E2E8F0;padding:12px;border-radius:6px;overflow-x:auto;font-size:11px;margin:8px 0;">{instructions[:200]}</pre></div>'
+
+
+def handle_ocr_scan():
+    """Placeholder for OCR scanning (would need file input)."""
+    if not check_tesseract_available():
+        return handle_ocr_status()
+    return "<p style='color:#6B7280;'>Upload a scanned PDF or image in the Upload tab, then click Process. OCR will be automatically used for scanned documents.</p>"
+
+
+def handle_export_gstr1_csv():
+    """Export GSTR-1 CSV file for GST portal upload."""
+    if not _CURRENT_PROJECT_ID:
+        return "No project selected", None
+
+    try:
+        invoices = get_invoices(_CURRENT_PROJECT_ID)
+        if not invoices:
+            return "No invoices to export", None
+
+        csv_content = _generate_gstr_csv(invoices, "gstr1")
+
+        output_dir = settings.BASE_DIR / "exports"
+        os.makedirs(output_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = str(output_dir / f"gstr1_portal_{ts}.csv")
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(csv_content)
+
+        add_activity(_CURRENT_PROJECT_ID, "export", "Exported GSTR-1 CSV", f"GST portal CSV saved to exports/")
+        return f"✅ GSTR-1 CSV saved to: {file_path}", gr.update(visible=True)
+    except Exception as e:
+        return f"❌ CSV export error: {str(e)}", None
+
+
+def handle_export_gstr3b_csv():
+    """Export GSTR-3B CSV file for GST portal upload."""
+    if not _CURRENT_PROJECT_ID:
+        return "No project selected", None
+
+    try:
+        invoices = get_invoices(_CURRENT_PROJECT_ID)
+        if not invoices:
+            return "No invoices to export", None
+
+        csv_content = _generate_gstr_csv(invoices, "gstr3b")
+
+        output_dir = settings.BASE_DIR / "exports"
+        os.makedirs(output_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = str(output_dir / f"gstr3b_portal_{ts}.csv")
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(csv_content)
+
+        add_activity(_CURRENT_PROJECT_ID, "export", "Exported GSTR-3B CSV", f"GST portal CSV saved to exports/")
+        return f"✅ GSTR-3B CSV saved to: {file_path}", gr.update(visible=True)
+    except Exception as e:
+        return f"❌ CSV export error: {str(e)}", None
 
 
 # ─── Utility Handlers ─────────────────────────────────────────────
@@ -528,6 +912,8 @@ def build_app():
     """Build and return the Gradio application."""
     init_auth_db()
     init_main_db()
+    init_activity_db()
+    init_processing_logs_db()
     ollama_status, ollama_msg = init_ollama()
 
     # Inject theme toggle JS directly into page head (avoids Gradio sanitization)
@@ -701,8 +1087,112 @@ def build_app():
                                     clear_chat_btn2 = gr.Button("🗑️ Clear Chat History", size="sm", elem_classes="gr-button-secondary")
                                     refresh_data_btn = gr.Button("🔄 Refresh Data", size="sm", elem_classes="gr-button-secondary")
 
+                                # ─── Dashboard Tab ──────────────────────────
+                        with gr.TabItem("📊 Dashboard", id=3):
+                            dashboard_content = gr.HTML(
+                                value='<div class="loading-dots"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>',
+                                elem_classes="dashboard-container",
+                            )
+                            with gr.Row():
+                                refresh_dashboard_btn = gr.Button("🔄 Refresh Dashboard", variant="primary", elem_classes="gr-button-secondary")
+
+                        # ─── Calendar Tab ───────────────────────────
+                        with gr.TabItem("📅 Calendar", id=4):
+                            calendar_content = gr.HTML(
+                                value='<div class="loading-dots"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>',
+                            )
+
+                        # ─── Tools Tab ─────────────────────────────
+                        with gr.TabItem("🔧 Tools", id=5):
+                            with gr.Tabs():
+                                with gr.TabItem("🧮 Tax Calculator"):
+                                    calculator_content = gr.HTML(build_tax_calculator_html())
+                                with gr.TabItem("🔍 HSN/SAC Lookup"):
+                                    hsn_content = gr.HTML(build_hsn_lookup_html())
+                                with gr.TabItem("📊 GST Portal CSV"):
+                                    gr.Markdown("### Export GST Portal-Ready CSV")
+                                    gr.Markdown("Download CSV files formatted for direct upload to the GST portal.")
+                                    with gr.Row():
+                                        export_gstr1_csv_btn = gr.Button("📥 Download GSTR-1 CSV", variant="primary", size="lg")
+                                        export_gstr3b_csv_btn = gr.Button("📥 Download GSTR-3B CSV", variant="primary", size="lg")
+                                    export_csv_msg = gr.Markdown("")
+
+                        # ─── Activity Tab ────────────────────────────
+                        with gr.TabItem("📋 Activity", id=6):
+                            activity_content = gr.HTML(
+                                value='<div class="loading-dots"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>',
+                            )
+                            with gr.Row():
+                                refresh_activity_btn = gr.Button("🔄 Refresh Activity", size="sm", elem_classes="gr-button-secondary")
+                                clear_activity_btn = gr.Button("🗑️ Clear", size="sm", elem_classes="gr-button-secondary")
+
+                        # ─── Accounting Tab ─────────────────────────
+                        with gr.TabItem("📈 Accounting", id=7):
+                            with gr.Tabs():
+                                with gr.TabItem("📊 Balance Sheet"):
+                                    bs_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project and click Generate</p>')
+                                    bs_btn = gr.Button("📊 Generate Balance Sheet", variant="primary", elem_classes="gr-button-secondary")
+                                with gr.TabItem("💰 Cash Flow"):
+                                    cf_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project and click Generate</p>')
+                                    cf_btn = gr.Button("💰 Generate Cash Flow Statement", variant="primary", elem_classes="gr-button-secondary")
+                                with gr.TabItem("⚖️ Trial Balance"):
+                                    tb_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project and click Generate</p>')
+                                    tb_btn = gr.Button("⚖️ Generate Trial Balance", variant="primary", elem_classes="gr-button-secondary")
+                                with gr.TabItem("📓 Ledger Summary"):
+                                    ls_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project and click Generate</p>')
+                                    ls_btn = gr.Button("📓 Generate Ledger", variant="primary", elem_classes="gr-button-secondary")
+
+                        # ─── TDS/TCS Tab ────────────────────────────
+                        with gr.TabItem("💰 TDS/TCS", id=8):
+                            tds_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project and click Calculate</p>')
+                            with gr.Row():
+                                tds_calc_btn = gr.Button("🧮 Calculate TDS/TCS", variant="primary")
+                            tcs_content = gr.HTML('')
+
+                        # ─── Penalty Calculator Tab ─────────────────
+                        with gr.TabItem("⚠️ Penalty", id=9):
+                            penalty_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project and click Assess</p>')
+                            with gr.Row():
+                                penalty_calc_btn = gr.Button("⚠️ Assess Penalty Risk", variant="primary")
+
+                        # ─── Cash Flow Forecast Tab ─────────────────
+                        with gr.TabItem("🔮 Forecast", id=10):
+                            forecast_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project and click Forecast</p>')
+                            with gr.Row():
+                                forecast_3mo_btn = gr.Button("3 Month Forecast", variant="primary", elem_classes="gr-button-secondary")
+                                forecast_6mo_btn = gr.Button("6 Month Forecast", variant="primary", elem_classes="gr-button-secondary")
+
+                        # ─── Knowledge Base Tab ─────────────────────
+                        with gr.TabItem("📚 Knowledge", id=11):
+                            with gr.Column():
+                                gr.Markdown("### GST Rule Knowledge Base")
+                                gr.Markdown("Search 60+ GST rules, sections, and provisions")
+                                kb_query = gr.Textbox(label="Search", placeholder="e.g., ITC eligibility, GSTR-1 due date, Section 16")
+                                kb_btn = gr.Button("🔍 Search Knowledge Base", variant="primary")
+                                kb_results = gr.HTML('<p style="color:#6B7280;text-align:center;padding:20px;">Enter a query above to search GST rules</p>')
+
+                        # ─── Onboarding Tab ─────────────────────────
+                        with gr.TabItem("📋 Onboarding", id=12):
+                            onboarding_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project to view onboarding checklist</p>')
+                            with gr.Row():
+                                onboarding_btn = gr.Button("📋 Show Onboarding Checklist", variant="primary")
+
+                        # ─── Processing Logs Tab ────────────────────
+                        with gr.TabItem("📜 Logs", id=13):
+                            logs_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:40px;">Select a project to view processing logs</p>')
+                            with gr.Row():
+                                logs_btn = gr.Button("📜 View Processing Logs", variant="primary")
+
+                        # ─── Tally Export Tab ───────────────────────
+                        with gr.TabItem("📦 Tally", id=14):
+                            gr.Markdown("### Export to Accounting Software")
+                            gr.Markdown("Generate Tally Prime, QuickBooks, and Zoho Books compatible exports")
+                            tally_content = gr.HTML('<p style="color:#6B7280;text-align:center;padding:20px;">Select a project and export</p>')
+                            with gr.Row():
+                                tally_export_btn = gr.Button("📦 Generate All Formats", variant="primary")
+
                         # ─── Settings Tab ─────────────────────────
-                        with gr.TabItem("⚙️ Settings", id=3):
+                        with gr.TabItem("⚙️ Settings", id=7):
                             with gr.Column():
                                 gr.Markdown("### Ollama Settings")
 
@@ -747,6 +1237,67 @@ def build_app():
                     </div>
                     """)
 
+        # ─── Dashboard ────────────────────────────────────────
+        refresh_dashboard_btn.click(
+            handle_refresh_dashboard,
+            outputs=[dashboard_content],
+        )
+
+        # ─── Calendar ──────────────────────────────────────────
+        # Calendar is static (loaded on init), but refreshable
+        app.load(
+            lambda: build_calendar_html(),
+            outputs=[calendar_content],
+        )
+
+        # ─── Activity ──────────────────────────────────────────
+        refresh_activity_btn.click(
+            handle_refresh_activity,
+            outputs=[activity_content],
+        )
+        clear_activity_btn.click(
+            handle_clear_activity,
+            outputs=[activity_content],
+        )
+
+        # ─── CSV Export ────────────────────────────────────────
+        export_gstr1_csv_btn.click(
+            handle_export_gstr1_csv,
+            outputs=[export_csv_msg, export_status],
+        )
+        export_gstr3b_csv_btn.click(
+            handle_export_gstr3b_csv,
+            outputs=[export_csv_msg, export_status],
+        )
+
+        # ─── Accounting Reports ────────────────────────────────
+        bs_btn.click(lambda: handle_accounting_report("balance_sheet"), outputs=[bs_content])
+        cf_btn.click(lambda: handle_accounting_report("cash_flow"), outputs=[cf_content])
+        tb_btn.click(lambda: handle_accounting_report("trial_balance"), outputs=[tb_content])
+        ls_btn.click(lambda: handle_accounting_report("ledger"), outputs=[ls_content])
+
+        # ─── TDS/TCS ──────────────────────────────────────────
+        tds_calc_btn.click(handle_tds_calculation, outputs=[tds_content, tcs_content])
+
+        # ─── Penalty Calculator ───────────────────────────────
+        penalty_calc_btn.click(handle_penalty_calculation, outputs=[penalty_content])
+
+        # ─── Cash Flow Forecast ───────────────────────────────
+        forecast_3mo_btn.click(lambda: handle_cash_flow_forecast(3), outputs=[forecast_content])
+        forecast_6mo_btn.click(lambda: handle_cash_flow_forecast(6), outputs=[forecast_content])
+
+        # ─── Knowledge Base ────────────────────────────────────
+        kb_btn.click(handle_knowledge_base_search, inputs=[kb_query], outputs=[kb_results])
+
+        # ─── Onboarding ────────────────────────────────────────
+        onboarding_btn.click(handle_onboarding_checklist, outputs=[onboarding_content])
+
+        # ─── Processing Logs ──────────────────────────────────
+        logs_btn.click(handle_processing_logs, outputs=[logs_content])
+
+        # ─── Tally Export ──────────────────────────────────────
+        tally_export_btn.click(handle_tally_export, outputs=[tally_content])
+
         # ─── Event Handlers ──────────────────────────────────────
 
         # Chat
@@ -764,7 +1315,7 @@ def build_app():
         project_dropdown.change(
             handle_select_project,
             inputs=[project_dropdown],
-            outputs=[project_info, project_stats, sidebar_content],
+            outputs=[project_info, project_stats, sidebar_content, dashboard_content],
         )
 
         create_confirm_btn.click(

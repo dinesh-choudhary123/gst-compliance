@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import init_auth_db
 from app.config import settings
 from app.ui.chat import build_app
+from app.activity_db import init_activity_db
 from app.api import router as api_router
 
 # Create FastAPI app
@@ -43,6 +44,7 @@ app.include_router(api_router, prefix="/api")
 @app.on_event("startup")
 async def startup():
     init_auth_db()
+    init_activity_db()
     # Ensure directories exist
     os.makedirs(settings.CLIENT_DATA_DIR, exist_ok=True)
     os.makedirs(settings.DATA_DIR, exist_ok=True)
